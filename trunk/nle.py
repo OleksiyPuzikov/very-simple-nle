@@ -1,0 +1,697 @@
+from PyQt4 import QtGui, QtCore
+import time
+import random
+
+import os
+
+from OpenGL.GL import *
+import numpy
+import pprint
+
+from lib.mlt import mlt as mlt
+from lib.view import GLView
+from lib.pytimecode import PyTimeCode as tc
+
+from lib.core import Clip
+
+from window_parameters import ParameterWindow
+
+texture_mode = GL_TEXTURE_RECTANGLE
+
+mlt.Factory.init()
+mlt_profile = mlt.Profile('square_pal_wide')
+
+class Scene():
+    def __init__(self):
+        self.clips = []
+        self.tracks = 2
+        self.filename = ""
+
+        self.playlists = []
+
+    def load(self, filename):
+        self.filename = filename
+
+        try:
+            fin = open(self.filename, "r")
+            self.clips = eval(fin.read())
+            fin.close()
+        except:
+            pass
+
+    def save(self):
+        fout = open(self.filename, "w")
+        pprint.pprint(self.clips, fout)
+        fout.close()
+
+    def save_as(self, filename):
+        self.filename = filename
+        self.save()
+
+    def generate_mlt(self):
+        max_tracks = 0
+        for c in self.clips:
+            c.producer = mlt.Producer(mlt_profile, c.path)
+
+            if (c.in_frame == 0) and (c.out_frame == 0): # badly generated data
+                c.out_frame = c.end_frame-c.start_frame
+
+            c.producer.set("in", c.in_frame)
+            c.producer.set("out", c.out_frame)
+            max_tracks = max(max_tracks, c.track)
+
+        self.tracks = int(max_tracks)
+
+        del self.playlists[:]
+
+        for track in range(int(max_tracks)+1):
+
+            pl = mlt.Playlist()
+
+            self.playlists.append(pl)
+
+            clips1 = filter(lambda x: x.track == track, self.clips)
+            clips2 = sorted(clips1, key=lambda x: x.start_frame)
+
+            if clips2[0].start_frame-1 > 0:
+                pl.blank(int(clips2[0].start_frame-1))
+
+            for x in range(len(clips2)):
+                pl.append(clips2[x].producer)
+                if x < len(clips2)-1:
+                    if clips2[x].end_frame+1 != clips2[x+1].start_frame:
+                        l = clips2[x+1].start_frame-clips2[x].end_frame-2
+                        pl.blank(int(l))
+
+            #pl.get_clip_at(100)
+
+            #i = pl.count()
+            #for c in range(i):
+            #    info = pl.clip_info(c)
+            #    print info.start, info.length, info.frame_in, info.frame_out, info.frame_count, info.resource
+
+        self.tractor = mlt.Tractor()
+        self.multitrack = self.tractor.multitrack()
+
+        for c, pl in enumerate(self.playlists):
+            self.multitrack.connect(pl, c)
+
+        self.consumer = mlt.Consumer(mlt_profile, "null")
+
+        self.consumer.set("real_time", -2)
+        self.consumer.set("rescale", "none")
+
+        self.consumer.connect(self.tractor)
+
+class MainForm(GLView):
+
+    def __init__(self, parent=None):
+        GLView.__init__(self, parent)
+
+        self.setWindowTitle("very-simple-nle")
+        self.setAcceptDrops(True)
+
+        self.scene = Scene()
+
+        self.parameters = ParameterWindow(main_window=self, parent=None)
+        self.parameters.show()
+        self.parameters.raise_()
+
+        self.setAutoFillBackground(False)
+        self.setAttribute(QtCore.Qt.WA_StaticContents, True)
+        self.setAttribute(QtCore.Qt.WA_OpaquePaintEvent, True)
+        self.setAttribute(QtCore.Qt.WA_NoSystemBackground, True)
+        self.setAttribute(QtCore.Qt.WA_PaintOnScreen, True)
+
+        self.playhead = 0
+        self.texture = -1
+        self.texture_data = None
+
+        self.tc = tc(25)
+
+        self.playbackTimer = QtCore.QTimer(self)
+        self.playbackTimer.setInterval(1000/25)
+        self.connect(self.playbackTimer, QtCore.SIGNAL("timeout()"), self.onPlaybackTimer)
+
+        self.play = False
+
+        if os.path.exists("test.scene"):
+            self.scene.load("test.scene")
+
+        else:
+            for c in range(10):
+                hue = random.random()
+
+                color = QtGui.QColor.fromHsvF(hue, 0.5, 0.75)
+                r, g, b = color.redF(), color.greenF(), color.blueF()
+
+                clip = Clip()
+                clip._color = (r, g, b, 1)
+                clip.name = "clip%d" % c
+
+                clip.start_frame = c*120
+                clip.end_frame = c*120+119
+
+                clip.track = random.randint(0, 1)
+                clip.path = "../media/output%d.mov" % clip.track
+
+                self.scene.clips.append(clip)
+
+            self.scene.save_as("test.scene")
+
+        self.scene.generate_mlt()
+
+        self.camera.translate(100, self.height()-50)
+
+        self.updateImage()
+
+    def dragEnterEvent(self, event):
+        event.accept()
+
+    def dragMoveEvent(self, event):
+        event.accept()
+
+    def dropEvent(self, event):
+        GLView.dropEvent(self, event)
+
+        if event.mimeData().hasUrls():
+            for url in event.mimeData().urls():
+                filename = str(url.toString(QtCore.QUrl.RemoveScheme))
+                filename = os.path.normpath(filename)
+
+                hue = random.random()
+
+                color = QtGui.QColor.fromHsvF(hue, 0.5, 0.75)
+                r, g, b = color.redF(), color.greenF(), color.blueF()
+
+                clip = Clip()
+                clip._color = (r, g, b, 1)
+                clip.name = os.path.basename(filename)
+
+                clip.producer = mlt.Producer(mlt_profile, filename)
+
+                p = self.camera.qt_to_opengl(event.pos())
+
+                clip.start_frame = p.x()
+                clip.end_frame = clip.start_frame+clip.producer.get_length()
+
+                clip.producer.set("in", 0)
+                clip.producer.set("out", clip.producer.get_length())
+
+                clip.track = self.scene.tracks
+                clip.path = filename
+
+                self.scene.clips.append(clip)
+
+                self.scene.generate_mlt()
+                self.updateImage()
+
+    def resizeEvent(self, event):
+        GLView.resizeEvent(self, event)
+        self.parameters.setGeometry(self.geometry().left()+5, self.geometry().top()+80, self.parameters.width(), self.parameters.height())
+
+    def moveEvent(self, event):
+        GLView.moveEvent(self, event)
+        self.parameters.setGeometry(self.geometry().left()+5, self.geometry().top()+80, self.parameters.width(), self.parameters.height())
+
+    def closeEvent(self, event):
+        self.parameters.close()
+        GLView.closeEvent(self, event)
+        self.scene.save()
+
+    def updateImage(self):
+        #self.scene.tractor.seek(self.playhead)
+        self.scene.consumer.purge()
+        self.scene.tractor.set_speed(0)
+        self.scene.tractor.seek(self.playhead)
+        self.scene.tractor.set_speed(1)
+
+        #print "--"*10
+        #for c, pl in enumerate(self.scene.playlists):
+        #    try:
+        #        producer = pl.get_clip_at(self.playhead)
+        #        print c, producer.is_blank() #producer.position()
+        #    except:
+        #        print c, "None"
+
+        frame = self.scene.consumer.get_frame()
+        frame.set("consumer_deinterlace", 1)
+
+        # Now we are ready to get the image and save it.
+        #size = (mlt_profile.width(), mlt_profile.height())
+        #size = (1280, 720)
+
+        w = 1280
+        h = 720
+
+        size = (w, h)
+        rgb = frame.get_image(mlt.mlt_image_rgb24, *size)
+
+        arr = numpy.fromstring(rgb, dtype=numpy.uint8)
+        #self.texture_data = arr.reshape((mlt_profile.width(), mlt_profile.height()+1, 3))
+        self.texture_data = arr.reshape((w, h+1, 3))
+
+        glDeleteTextures(self.texture)
+        self.texture = -1
+
+        self.update()
+
+    def onPlaybackTimer(self):
+        self.playhead += 1 # self.scene.tractor.frame()
+        self.updateImage()
+        self.update()
+
+    def mousePressEvent(self, event):
+        GLView.mousePressEvent(self, event)
+
+        p = self.camera.qt_to_opengl(event.pos())
+
+        if event.buttons() & QtCore.Qt.LeftButton:
+            for c in self.scene.clips:
+                c._selected = c.inside(p.x(), p.y())
+
+        self.update()
+
+        for c in self.scene.clips:
+            if c._selected:
+                k, v = c.getData()
+                self.parameters.setData(c, k, v)
+
+    def mouseMoveEvent(self, event):
+
+        dx = 1.0*(event.x() - self._mousePos.x())/self.camera.m[0]
+        dy = 1.0*(event.y() - self._mousePos.y())/self.camera.m[0]
+
+        GLView.mouseMoveEvent(self, event)
+
+        if event.buttons() & QtCore.Qt.LeftButton:
+
+            nodesMoved = False
+
+            # move selected nodes...
+
+            selectedClips = filter(lambda i: i._selected, self.scene.clips)
+            nodesMoved = bool(selectedClips)
+
+            for n in selectedClips:
+                n.start_frame += dx
+                n.end_frame += dx
+
+            if nodesMoved:
+                c = selectedClips[0]
+                k, v = c.getData()
+
+                self.parameters.setData(c, k, v)
+
+                self.scene.generate_mlt()
+                self.updateImage()
+
+            if not nodesMoved:
+
+                ph = self.camera.qt_to_opengl(event.pos())
+
+                self.playhead = ph.x()
+                self.updateImage()
+
+                self.scene.consumer.purge()
+                self.scene.tractor.set_speed(0)
+                self.scene.tractor.seek(self.playhead-100)
+                self.scene.tractor.set_speed(1)
+
+    def keyPressEvent(self, event):
+        GLView.keyPressEvent(self, event)
+
+        if event.key() == QtCore.Qt.Key_Space:
+            self.play = not self.play
+
+            if self.play:
+                self.playbackTimer.start()
+                self.scene.consumer.start()
+            else:
+                self.playbackTimer.stop()
+                self.scene.consumer.stop()
+
+        elif event.key() == QtCore.Qt.Key_Left:
+            self.playhead -= 1
+            self.updateImage()
+            self.update()
+
+        elif event.key() == QtCore.Qt.Key_Right:
+            self.playhead += 1
+            self.updateImage()
+            self.update()
+
+        elif event.key() == QtCore.Qt.Key_1:
+            pass
+
+        elif event.key() == QtCore.Qt.Key_Delete:
+            for clip in self.scene.clips:
+                if clip._selected:
+
+                    #clip.producer.close()
+                    self.scene.clips.remove(clip)
+
+                    self.scene.generate_mlt()
+                    self.updateImage()
+
+        elif event.key() == QtCore.Qt.Key_B:
+            pass
+
+        elif event.key() == QtCore.Qt.Key_I:
+            pass
+
+        elif event.key() == QtCore.Qt.Key_O:
+            pass
+
+
+    def paintGL(self):
+        leftHandWidth = 100
+
+        time1 = time.time()
+
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+
+        glEnable(GL_BLEND)
+        glDepthMask(GL_FALSE)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+
+        glLoadIdentity()
+
+        glLoadMatrixf(self.camera.m)
+
+        glColor4f(1.0, 1.0, 1.0, 1.0)
+
+        # clips
+
+        for clip in self.scene.clips:
+            self.unoptimizedLabelRect(clip.start_frame, 0-clip.track*50, clip.end_frame+1, 50-clip.track*50, clip.name, clip._color, (1, 1, 1, 1), selected = clip._selected)
+
+        # switch back to screen space
+
+        glLoadIdentity()
+
+        # test = find tracks top and display stuff there
+
+        trackTop = self.camera.opengl_to_qt(QtCore.QPoint(-self.scene.tracks*50, 0))
+
+        # timeline
+
+        timelineTicks = []
+
+        glColor4f(1, 1, 1, 1.0)
+        for c in range(self.width()/25):
+
+            p1 = self.camera.opengl_to_qt(QtCore.QPoint(c*25, 0))
+
+            top = trackTop.y()
+            height = 5
+
+            if c % 30 == 0:
+                height = 10
+
+                self.tc.frames = c*25
+                self.renderText(p1.x()+1, top-10-self.scene.tracks*50, "%s" % str(self.tc))
+
+            if c % 60 == 0:
+                height = 35
+
+            timelineTicks.extend([p1.x(), top-height-self.scene.tracks*50, p1.x(), top-self.scene.tracks*50])
+
+        glColor4f(1.0, 0.0, 1.0, 1.0)
+        glVertexPointer(2, GL_FLOAT, 0, timelineTicks)
+        glEnableClientState(GL_VERTEX_ARRAY)
+
+        glDrawArrays(GL_LINES, 0, len(timelineTicks)/2)
+
+        glDisableClientState(GL_VERTEX_ARRAY)
+
+        # playhead
+
+        sph_width = max(1.0, 1 * self.camera.m[0])
+
+        p2 = self.camera.opengl_to_qt(QtCore.QPoint(self.playhead, 0))
+        sph = p2.x()
+
+        glColor(0, 255, 0)
+        glEnableClientState(GL_VERTEX_ARRAY)
+        squareVertices = [
+              sph,           trackTop.y()-self.scene.tracks*50-25,
+              sph,           trackTop.y()+50,
+              sph+sph_width, trackTop.y()+50,
+              sph+sph_width, trackTop.y()-self.scene.tracks*50-25,
+        ]
+
+        glVertexPointer(2, GL_FLOAT, 0, squareVertices)
+
+        glDrawArrays(GL_QUADS, 0, len(squareVertices)/2)
+
+        squareVertices = [
+              sph-35, trackTop.y()-self.scene.tracks*50-25-25,
+              sph-35, trackTop.y()-self.scene.tracks*50-25,
+              sph+35, trackTop.y()-self.scene.tracks*50-25,
+              sph+35, trackTop.y()-self.scene.tracks*50-25-25,
+        ]
+
+        glVertexPointer(2, GL_FLOAT, 0, squareVertices)
+
+        glDrawArrays(GL_QUADS, 0, len(squareVertices)/2)
+
+        glDisableClientState(GL_VERTEX_ARRAY)
+
+        glColor4f(0.0, 0.0, 0.0, 1.0)
+        self.tc.frames = self.playhead#-leftHandWidth
+        self.renderText(sph-30+2, trackTop.y()-self.scene.tracks*50-25-15, "%s" % str(self.tc))
+        self.renderText(sph-30+2, trackTop.y()-self.scene.tracks*50-25-15+12, "%s" % str(self.tc.frames))
+
+        # track names
+
+        for c in range(self.scene.tracks+1):
+            clipsCoordinates = 0 # vertically
+
+            p1 = self.camera.opengl_to_qt(QtCore.QPoint(0, clipsCoordinates))
+            self.unoptimizedLabelRect(0, p1.y()-(c)*50, leftHandWidth, p1.y()-(c-1)*50, "track %d" % c, (0.5, 0.5, 0.5, 1), (1, 1, 1, 1), False, False)
+
+        # image
+
+        if self.texture_data is not None:
+            if self.texture == -1:
+                self.texture = self.convertNumpyToGLTexture(self.texture_data)
+                self.texture_data = None
+
+        if self.texture != -1:
+
+            w = 1280/2
+            h = 720/2
+
+            glColor4f(1.0, 1.0, 1.0, 1.0)
+            x1 = self.width()-w
+            y1 = 0
+
+            x2 = x1+w
+            y2 = y1+h
+
+            pointVertices = numpy.array([ x1, y1, x1, y2, x2, y2, x2, y1 ], dtype=numpy.float32)
+
+            x1 = 0
+            y1 = 0
+
+            x2 = w*2
+            y2 = h*2
+
+            textureCoordinates = numpy.array([ 0, 0, 0, y2, x2, y2, x2, 0 ], dtype=numpy.float32)
+
+            glEnable(texture_mode)
+
+            glEnableClientState(GL_VERTEX_ARRAY)
+            glEnableClientState(GL_TEXTURE_COORD_ARRAY)
+
+            glBindTexture(texture_mode, self.texture)
+
+            glVertexPointer(2, GL_FLOAT, 0, pointVertices)
+            glTexCoordPointer(2, GL_FLOAT, 0, textureCoordinates)
+
+            glDrawArrays(GL_QUADS, 0, len(pointVertices)/2)
+
+            glDisableClientState(GL_TEXTURE_COORD_ARRAY)
+            glDisableClientState(GL_VERTEX_ARRAY)
+            glDisable(texture_mode)
+
+            # border
+
+            glEnableClientState(GL_VERTEX_ARRAY)
+
+            glVertexPointer(2, GL_FLOAT, 0, pointVertices)
+            glDrawArrays(GL_LINE_STRIP, 0, len(pointVertices)/2)
+
+            glDisableClientState(GL_VERTEX_ARRAY)
+        #
+        # debugging - fps
+
+        glColor4f(1.0, 1.0, 1.0, 1.0)
+        dtime = time.time()-time1
+        self.renderText(10, 25, "%05d fps" % (int(1/dtime)))
+
+        # current tc
+
+        #self.tc.frames = self.playhead
+        self.renderText(10, 50, "%s" % str(self.tc))
+
+    def _prepare_gl_line_loop_tl(self, x1, y1, x2, y2):
+        sz = 2
+
+        return [
+              x1, y1,
+              x1, y2,
+              x1+sz, y2,
+              x1+sz, y1,
+
+              x1, y1,
+              x2, y1,
+              x2, y1+sz,
+              x1, y1+sz,
+
+              ]
+
+    def _prepare_gl_line_loop_br(self, x1, y1, x2, y2):
+        sz = 2
+
+        return [
+              x2, y1,
+              x2, y2,
+              x2-sz, y2,
+              x2-sz, y1,
+
+              x1, y2,
+              x2, y2,
+              x2, y2-sz,
+              x1, y2-sz,
+
+              ]
+
+
+    def _prepare_gl_quads(self, x1, y1, x2, y2):
+        return [
+              x1, y1,
+              x1, y2,
+              x2, y2,
+              x2, y1, ]
+
+    def unoptimizedLabelRect(self, x1, y1, x2, y2, label, color1, color2, fontScaled = True, selected = False):
+
+        if selected:
+            color1 = (color1[0]*1.1, color1[1]*1.1, color1[2]*1.1, color1[3])
+
+            vertices_br = self._prepare_gl_line_loop_tl(x1, y1, x2, y2)
+            vertices_lt = self._prepare_gl_line_loop_br(x1, y1, x2, y2)
+
+        else:
+
+            vertices_lt = self._prepare_gl_line_loop_tl(x1, y1, x2, y2)
+            vertices_br = self._prepare_gl_line_loop_br(x1, y1, x2, y2)
+
+        vertices  = self._prepare_gl_quads(x1, y1, x2, y2)
+
+        glEnableClientState(GL_VERTEX_ARRAY)
+
+        #if selected:
+        #    verticesSelected  = self._prepare_gl_quads(x1-3, y1-3, x2+3, y2+3)
+        #
+        #    glColor4f(1, 0, 0, 0.5)
+        #    glVertexPointer(2, GL_FLOAT, 0, verticesSelected)
+        #    glDrawArrays(GL_QUADS, 0, len(verticesSelected)/2)
+
+        glColor4f(*color1)
+        glVertexPointer(2, GL_FLOAT, 0, vertices)
+        glDrawArrays(GL_QUADS, 0, len(vertices)/2)
+
+        #
+
+        bcolor = (color1[0]*1.3, color1[1]*1.3, color1[2]*1.3, color1[3])
+
+        #glColor4f(1, 1, 1, 0.5)
+        glColor4f(*bcolor)
+        glVertexPointer(2, GL_FLOAT, 0, vertices_lt)
+        glDrawArrays(GL_QUADS, 0, len(vertices_lt)/2)
+
+        dcolor = (color1[0]/1.1, color1[1]/1.1, color1[2]/1.1, color1[3])
+
+        #glColor4f(0.5, 0.5, 0.5, 0.5)
+        glColor4f(*dcolor)
+        glVertexPointer(2, GL_FLOAT, 0, vertices_br)
+        glDrawArrays(GL_QUADS, 0, len(vertices_br)/2)
+
+        glDisableClientState(GL_VERTEX_ARRAY)
+
+        glColor4f(0.2, 0.2, 0.2, 1.0)
+        if selected:
+            dx = 1
+        else:
+            dx = 0
+        if fontScaled:
+            p1 = self.camera.opengl_to_qt(QtCore.QPoint(x1, y1))
+            self.renderText(p1.x()+2+dx, p1.y()+10+2+dx, label)
+        else:
+            self.renderText(x1+2+dx, y1+10+2+dx, label)
+
+#class MainForm2(QtGui.QWidget):
+#
+#    def __init__(self, parent=None):
+#        QtGui.QWidget.__init__(self, parent)
+#
+#        self.setGeometry(0, 0, 1920, 1150)
+#
+#        self.setWindowTitle("nle")
+#
+#        self.mainLayout = QtGui.QVBoxLayout(self)
+#        self.mainLayout.setSpacing(0)
+#        self.mainLayout.setContentsMargins(0, 0, 0, 0)
+#
+#        self.menubar = QtGui.QMenuBar()
+#        sizePolicy = QtGui.QSizePolicy(QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Fixed)
+#        sizePolicy.setHorizontalStretch(0)
+#        sizePolicy.setVerticalStretch(0)
+#        sizePolicy.setHeightForWidth(self.menubar.sizePolicy().hasHeightForWidth())
+#        self.menubar.setSizePolicy(sizePolicy)
+#        self.menubar.setMaximumSize(QtCore.QSize(15000, 19))
+#
+#        self.menuFile = QtGui.QMenu("File", self.menubar)
+#        self.menuView = QtGui.QMenu("View", self.menubar)
+#
+#        self.actionOpen_project = QtGui.QAction("Open project", self)
+#        self.actionOpen_project.setShortcut("Ctrl+O")
+#
+#        self.actionNew_project = QtGui.QAction("New project", self)
+#        self.actionNew_project.setShortcut("Ctrl+N")
+#
+#        self.actionSave_project = QtGui.QAction("Save project", self)
+#        self.actionSave_project.setShortcut("Ctrl+S")
+#
+#        self.actionSave_project_as = QtGui.QAction("Save project as", self)
+#        self.actionSave_project_as.setShortcut("Ctrl+Shift+S")
+#
+#        self.actionQuit = QtGui.QAction("Quit", self)
+#        self.actionQuit.setShortcut("Ctrl+Q")
+#
+#        self.action1_1 = QtGui.QAction("1:1", self)
+#
+#        self.menuFile.addAction(self.actionNew_project)
+#        self.menuFile.addAction(self.actionOpen_project)
+#        self.menuFile.addSeparator()
+#        self.menuFile.addAction(self.actionSave_project)
+#        self.menuFile.addAction(self.actionSave_project_as)
+#        self.menuFile.addSeparator()
+#        self.menuFile.addAction(self.actionQuit)
+#        self.menuView.addAction(self.action1_1)
+#        self.menubar.addAction(self.menuFile.menuAction())
+#        self.menubar.addAction(self.menuView.menuAction())
+#
+#        self.mainLayout.addWidget(self.menubar)
+#        self.mainLayout.addWidget(MainForm(), 1)
+
+app = QtGui.QApplication([])
+
+f = MainForm()
+f.show()
+f.raise_()
+
+app.exec_()
