@@ -1,0 +1,10 @@
+[Clip(mediatype='', name='clip0', id='', start_frame=11, end_frame=60, in_frame=0, out_frame=49, path='../media/output1.mov', track=0, color=(0.75, 0.375, 0.448, 1)),
+ Clip(mediatype='', name='clip1', id='', start_frame=90, end_frame=139, in_frame=0, out_frame=49, path='../media/output1.mov', track=0, color=(0.552, 0.375, 0.75, 1)),
+ Clip(mediatype='', name='clip2', id='', start_frame=168, end_frame=217, in_frame=0, out_frame=49, path='../media/output1.mov', track=0, color=(0.375, 0.736, 0.75, 1)),
+ Clip(mediatype='', name='clip7', id='', start_frame=276, end_frame=325, in_frame=0, out_frame=49, path='../media/output1.mov', track=0, color=(0.375, 0.75, 0.739, 1)),
+ Clip(mediatype='', name='clip9', id='', start_frame=415, end_frame=464, in_frame=0, out_frame=49, path='../media/output1.mov', track=0, color=(0.75, 0.679, 0.375, 1)),
+ Clip(mediatype='', name='clip3', id='', start_frame=18, end_frame=60, in_frame=0, out_frame=42, path='../media/output2.mov', track=2, color=(0.75, 0.549, 0.375, 1)),
+ Clip(mediatype='', name='clip4', id='', start_frame=69, end_frame=118, in_frame=0, out_frame=49, path='../media/output2.mov', track=1, color=(0.375, 0.673, 0.75, 1)),
+ Clip(mediatype='', name='clip5', id='', start_frame=89, end_frame=133, in_frame=0, out_frame=49, path='../media/output2.mov', track=3, color=(0.375, 0.637, 0.75, 1)),
+ Clip(mediatype='', name='clip6', id='', start_frame=343, end_frame=392, in_frame=0, out_frame=49, path='../media/output2.mov', track=1, color=(0.75, 0.708, 0.375, 1)),
+ Clip(mediatype='', name='clip8', id='', start_frame=223, end_frame=272, in_frame=0, out_frame=49, path='../media/output2.mov', track=1, color=(0.75, 0.375, 0.502, 1))]
