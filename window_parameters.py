@@ -10,7 +10,7 @@ class ParameterWindow(QtGui.QWidget):
 
         self.setStyleSheet("""font-size:10pt; background-color: rgb(70, 70, 70); color: rgb(255, 255, 255);""")
 
-        self.setGeometry(0, 0, 300, 480)
+        self.setGeometry(0, 0, 300, 400)
 
         self.layout = QtGui.QFormLayout(self)
 
