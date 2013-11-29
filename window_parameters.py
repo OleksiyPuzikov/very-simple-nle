@@ -5,7 +5,8 @@ class ParameterWindow(QtGui.QWidget):
     def __init__(self, main_window=None, parent=None):
         QtGui.QWidget.__init__(self, parent)
 
-        self.setWindowFlags(QtCore.Qt.WindowStaysOnTopHint | QtCore.Qt.Tool)
+        self.setWindowFlags(QtCore.Qt.WindowTitleHint | QtCore.Qt.WindowStaysOnTopHint | QtCore.Qt.Tool | QtCore.Qt.CustomizeWindowHint)
+        self.setWindowTitle("properties")
 
         self.setStyleSheet("""font-size:10pt; background-color: rgb(70, 70, 70); color: rgb(255, 255, 255);""")
 

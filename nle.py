@@ -19,7 +19,8 @@ from window_parameters import ParameterWindow
 texture_mode = GL_TEXTURE_RECTANGLE
 
 mlt.Factory.init()
-mlt_profile = mlt.Profile('square_pal_wide')
+#mlt_profile = mlt.Profile('square_pal_wide')
+mlt_profile = mlt.Profile('hdv_720_25p')
 
 class Scene():
     def __init__(self):
@@ -98,10 +99,11 @@ class Scene():
 
         self.consumer = mlt.Consumer(mlt_profile, "null")
 
-        self.consumer.set("real_time", -2)
+        #self.consumer.set("real_time", -2)
         self.consumer.set("rescale", "none")
 
         self.consumer.connect(self.tractor)
+
 
 class MainForm(GLView):
 
@@ -165,6 +167,12 @@ class MainForm(GLView):
 
         self.updateImage()
 
+        self.extendLeft = None
+        self.extendRight = None
+
+        self.cursorLeft = QtGui.QCursor(QtGui.QPixmap("trim_left.png"))
+        self.cursorRight = QtGui.QCursor(QtGui.QPixmap("trim_right.png"))
+
     def dragEnterEvent(self, event):
         event.accept()
 
@@ -193,10 +201,16 @@ class MainForm(GLView):
                 p = self.camera.qt_to_opengl(event.pos())
 
                 clip.start_frame = p.x()
-                clip.end_frame = clip.start_frame+clip.producer.get_length()
+
+                cpgl = clip.producer.get_length()
+
+                if cpgl == 15000: # some hardcoded value?
+                    cpgl = 25
+
+                clip.end_frame = clip.start_frame+cpgl
 
                 clip.producer.set("in", 0)
-                clip.producer.set("out", clip.producer.get_length())
+                clip.producer.set("out", cpgl)
 
                 clip.track = self.scene.tracks
                 clip.path = filename
@@ -208,11 +222,13 @@ class MainForm(GLView):
 
     def resizeEvent(self, event):
         GLView.resizeEvent(self, event)
-        self.parameters.setGeometry(self.geometry().left()+5, self.geometry().top()+80, self.parameters.width(), self.parameters.height())
+        #self.parameters.setGeometry(self.geometry().left()+5, self.geometry().top()+80, self.parameters.width(), self.parameters.height())
+        self.parameters.setGeometry(self.geometry().left()+5, self.geometry().top()+25, self.parameters.width(), self.parameters.height())
 
     def moveEvent(self, event):
         GLView.moveEvent(self, event)
-        self.parameters.setGeometry(self.geometry().left()+5, self.geometry().top()+80, self.parameters.width(), self.parameters.height())
+        #self.parameters.setGeometry(self.geometry().left()+5, self.geometry().top()+80, self.parameters.width(), self.parameters.height())
+        self.parameters.setGeometry(self.geometry().left()+5, self.geometry().top()+25, self.parameters.width(), self.parameters.height())
 
     def closeEvent(self, event):
         self.parameters.close()
@@ -261,6 +277,11 @@ class MainForm(GLView):
         self.updateImage()
         self.update()
 
+    def mouseReleaseEvent(self, event):
+        self.extendLeft = None
+        self.extendRight = None
+        self.setCursor(QtCore.Qt.ArrowCursor)
+
     def mousePressEvent(self, event):
         GLView.mousePressEvent(self, event)
 
@@ -272,10 +293,22 @@ class MainForm(GLView):
 
         self.update()
 
-        for c in self.scene.clips:
-            if c._selected:
-                k, v = c.getData()
-                self.parameters.setData(c, k, v)
+        selectedClips = filter(lambda i: i._selected, self.scene.clips)
+
+        for c in selectedClips:
+            k, v = c.getData()
+            self.parameters.setData(c, k, v)
+
+        for c in selectedClips:
+            if c.inside(p.x(), p.y()):
+                if p.x()-c.start_frame in range(0, 15):
+                    self.extendLeft = c
+                    self.setCursor(self.cursorLeft)
+                elif c.end_frame-p.x() in range(0, 15):
+                    self.extendRight = c
+                    self.setCursor(self.cursorRight)
+                else:
+                    self.setCursor(QtCore.Qt.ArrowCursor)
 
     def mouseMoveEvent(self, event):
 
@@ -293,9 +326,33 @@ class MainForm(GLView):
             selectedClips = filter(lambda i: i._selected, self.scene.clips)
             nodesMoved = bool(selectedClips)
 
-            for n in selectedClips:
-                n.start_frame += dx
-                n.end_frame += dx
+            if (self.extendLeft is None) and (self.extendRight is None):
+                for n in selectedClips:
+                    n.start_frame += dx
+                    n.end_frame += dx
+            else:
+                if self.extendLeft:
+                    sel = self.extendLeft
+
+                    sel.start_frame += dx
+                    sel.in_frame += dx
+
+                    if sel.in_frame < 0:
+                        ddx = sel.in_frame
+                        sel.in_frame = 0
+                        sel.end_frame += ddx
+
+                    #elif self.start_frame > self.stop_frame:
+
+
+                elif self.extendRight:
+                    sel = self.extendRight
+                    sel.end_frame += dx
+                    sel.out_frame += dx
+
+                    if sel.out_frame > sel.producer.get_length()-sel.in_frame:
+                        sel.end_frame -= dx
+                        sel.out_frame -= dx
 
             if nodesMoved:
                 c = selectedClips[0]
@@ -318,6 +375,19 @@ class MainForm(GLView):
                 self.scene.tractor.seek(self.playhead-100)
                 self.scene.tractor.set_speed(1)
 
+        else:
+            p = self.camera.qt_to_opengl(event.pos())
+            selectedClips = filter(lambda i: i._selected, self.scene.clips)
+            for c in selectedClips:
+                if c.inside(p.x(), p.y()):
+                    if p.x()-c.start_frame in range(0, 15):
+                        self.setCursor(self.cursorLeft)
+                    elif c.end_frame-p.x() in range(0, 15):
+                        self.setCursor(self.cursorRight)
+                    else:
+                        self.setCursor(QtCore.Qt.ArrowCursor)
+
+
     def keyPressEvent(self, event):
         GLView.keyPressEvent(self, event)
 
@@ -326,10 +396,12 @@ class MainForm(GLView):
 
             if self.play:
                 self.playbackTimer.start()
+                self.scene.consumer.purge()
                 self.scene.consumer.start()
             else:
                 self.playbackTimer.stop()
                 self.scene.consumer.stop()
+                self.scene.consumer.purge()
 
         elif event.key() == QtCore.Qt.Key_Left:
             self.playhead -= 1
@@ -341,28 +413,68 @@ class MainForm(GLView):
             self.updateImage()
             self.update()
 
-        elif event.key() == QtCore.Qt.Key_1:
+        elif event.key() == QtCore.Qt.Key_1: # view 1:1
+            self.camera.identity()
+            self.camera.translate(100, self.height()-50)
+            self.update()
+
+        elif event.key() == QtCore.Qt.Key_C: # compact
             pass
 
         elif event.key() == QtCore.Qt.Key_Delete:
             for clip in self.scene.clips:
                 if clip._selected:
 
-                    #clip.producer.close()
                     self.scene.clips.remove(clip)
 
                     self.scene.generate_mlt()
                     self.updateImage()
 
-        elif event.key() == QtCore.Qt.Key_B:
+        elif event.key() == QtCore.Qt.Key_B: # split
+            selectedClips = filter(lambda i: i._selected, self.scene.clips)
+            sc2 = []
+
+            for c in selectedClips:
+                if c.inside(self.playhead, -50*c.track+10):
+                    sc2.append(c)
+
+            if sc2:
+                clip = sc2[0]
+
+                del clip.producer
+
+                import copy
+                c1 = copy.deepcopy(clip)
+                c2 = copy.deepcopy(clip)
+
+                c1.end_frame = self.playhead
+                c1.out_frame = c1.in_frame + (c1.end_frame-c1.start_frame)
+
+                c2.in_frame = c2.in_frame + (self.playhead-c2.start_frame) + 1
+                c2.start_frame = self.playhead+1
+
+                self.scene.clips.remove(clip)
+
+                self.scene.clips.append(c1)
+                self.scene.clips.append(c2)
+
+                self.scene.generate_mlt()
+                self.updateImage()
+
+        elif event.key() == QtCore.Qt.Key_I: # move in point
             pass
 
-        elif event.key() == QtCore.Qt.Key_I:
+        elif event.key() == QtCore.Qt.Key_O: # move out point
             pass
 
-        elif event.key() == QtCore.Qt.Key_O:
-            pass
-
+        elif event.key() == QtCore.Qt.Key_F2: # rename
+            selectedClips = filter(lambda i: i._selected, self.scene.clips)
+            if selectedClips:
+                c = selectedClips[0]
+                new_name, ok = QtGui.QInputDialog.getText(self, "Rename clip", "Rename clip to", text = c.name)
+                if ok:
+                    c.name = str(new_name)
+                    self.update()
 
     def paintGL(self):
         leftHandWidth = 100
@@ -507,6 +619,7 @@ class MainForm(GLView):
 
             glBindTexture(texture_mode, self.texture)
 
+
             glVertexPointer(2, GL_FLOAT, 0, pointVertices)
             glTexCoordPointer(2, GL_FLOAT, 0, textureCoordinates)
 
@@ -524,17 +637,16 @@ class MainForm(GLView):
             glDrawArrays(GL_LINE_STRIP, 0, len(pointVertices)/2)
 
             glDisableClientState(GL_VERTEX_ARRAY)
-        #
+
         # debugging - fps
 
         glColor4f(1.0, 1.0, 1.0, 1.0)
         dtime = time.time()-time1
-        self.renderText(10, 25, "%05d fps" % (int(1/dtime)))
+        #self.renderText(self.width()-100, self.height()-25, "%05d fps" % (int(1/dtime)))
 
         # current tc
 
-        #self.tc.frames = self.playhead
-        self.renderText(10, 50, "%s" % str(self.tc))
+        #self.renderText(self.width()-100, self.height()-50, "%s" % str(self.tc))
 
     def _prepare_gl_line_loop_tl(self, x1, y1, x2, y2):
         sz = 2
@@ -633,65 +745,12 @@ class MainForm(GLView):
         else:
             self.renderText(x1+2+dx, y1+10+2+dx, label)
 
-#class MainForm2(QtGui.QWidget):
-#
-#    def __init__(self, parent=None):
-#        QtGui.QWidget.__init__(self, parent)
-#
-#        self.setGeometry(0, 0, 1920, 1150)
-#
-#        self.setWindowTitle("nle")
-#
-#        self.mainLayout = QtGui.QVBoxLayout(self)
-#        self.mainLayout.setSpacing(0)
-#        self.mainLayout.setContentsMargins(0, 0, 0, 0)
-#
-#        self.menubar = QtGui.QMenuBar()
-#        sizePolicy = QtGui.QSizePolicy(QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Fixed)
-#        sizePolicy.setHorizontalStretch(0)
-#        sizePolicy.setVerticalStretch(0)
-#        sizePolicy.setHeightForWidth(self.menubar.sizePolicy().hasHeightForWidth())
-#        self.menubar.setSizePolicy(sizePolicy)
-#        self.menubar.setMaximumSize(QtCore.QSize(15000, 19))
-#
-#        self.menuFile = QtGui.QMenu("File", self.menubar)
-#        self.menuView = QtGui.QMenu("View", self.menubar)
-#
-#        self.actionOpen_project = QtGui.QAction("Open project", self)
-#        self.actionOpen_project.setShortcut("Ctrl+O")
-#
-#        self.actionNew_project = QtGui.QAction("New project", self)
-#        self.actionNew_project.setShortcut("Ctrl+N")
-#
-#        self.actionSave_project = QtGui.QAction("Save project", self)
-#        self.actionSave_project.setShortcut("Ctrl+S")
-#
-#        self.actionSave_project_as = QtGui.QAction("Save project as", self)
-#        self.actionSave_project_as.setShortcut("Ctrl+Shift+S")
-#
-#        self.actionQuit = QtGui.QAction("Quit", self)
-#        self.actionQuit.setShortcut("Ctrl+Q")
-#
-#        self.action1_1 = QtGui.QAction("1:1", self)
-#
-#        self.menuFile.addAction(self.actionNew_project)
-#        self.menuFile.addAction(self.actionOpen_project)
-#        self.menuFile.addSeparator()
-#        self.menuFile.addAction(self.actionSave_project)
-#        self.menuFile.addAction(self.actionSave_project_as)
-#        self.menuFile.addSeparator()
-#        self.menuFile.addAction(self.actionQuit)
-#        self.menuView.addAction(self.action1_1)
-#        self.menubar.addAction(self.menuFile.menuAction())
-#        self.menubar.addAction(self.menuView.menuAction())
-#
-#        self.mainLayout.addWidget(self.menubar)
-#        self.mainLayout.addWidget(MainForm(), 1)
+if __name__ == '__main__':
 
-app = QtGui.QApplication([])
+    app = QtGui.QApplication([])
 
-f = MainForm()
-f.show()
-f.raise_()
+    f = MainForm()
+    f.show()
+    f.raise_()
 
-app.exec_()
+    app.exec_()
