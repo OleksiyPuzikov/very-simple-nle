@@ -49,6 +49,8 @@ class Clip():
         for kkk, vvv in zip(k, v):
             s += "%s=%s " % (kkk, str(vvv))
 
+        return s
+
         #return ":: name='%s', start_frame=%d, end_frame=%d, in_frame=%d, out_frame=%d, path='%s', track=%d" % \
         #       (self.name,
         #        self.start_frame,

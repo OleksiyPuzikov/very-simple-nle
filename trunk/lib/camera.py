@@ -34,7 +34,7 @@ class Camera(object):
 
     def scale(self, ds):
         self.m[0] *= ds
-        self.m[5] *= ds
+        #self.m[5] *= ds # disabled just for this application because we only scale horizontally
 
     def _reshaped(self):
         return reshape(self.m, (2 * 2, 2 * 2), "F")
