@@ -248,13 +248,11 @@ class MainForm(GLView):
 
     def resizeEvent(self, event):
         GLView.resizeEvent(self, event)
-        #self.parameters.setGeometry(self.geometry().left()+5, self.geometry().top()+80, self.parameters.width(), self.parameters.height())
         self.parameters.setGeometry(self.geometry().left()+5, self.geometry().top()+25, self.parameters.width(), self.parameters.height())
 
         w = 1280/2
         h = 720/2
 
-        #glColor4f(1.0, 1.0, 1.0, 1.0)
         x1 = self.width()-w
         y1 = 0
 
@@ -274,7 +272,6 @@ class MainForm(GLView):
 
     def moveEvent(self, event):
         GLView.moveEvent(self, event)
-        #self.parameters.setGeometry(self.geometry().left()+5, self.geometry().top()+80, self.parameters.width(), self.parameters.height())
         self.parameters.setGeometry(self.geometry().left()+5, self.geometry().top()+25, self.parameters.width(), self.parameters.height())
 
     def closeEvent(self, event):
@@ -283,7 +280,6 @@ class MainForm(GLView):
         self.scene.save()
 
     def updateImage(self):
-        #self.scene.tractor.seek(self.playhead)
         self.scene.consumer.purge()
         self.scene.tractor.set_speed(0)
         self.scene.tractor.seek(self.playhead)
