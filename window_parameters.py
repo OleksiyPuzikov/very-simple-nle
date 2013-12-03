@@ -13,6 +13,8 @@ class ParameterWindow(QtGui.QWidget):
         self.setGeometry(0, 0, 300, 400)
 
         self.layout = QtGui.QFormLayout(self)
+        self.layout.setSpacing(2)
+        self.layout.setContentsMargins(3, 3, 3, 3)
 
         self.keys = []
         self.values = []
@@ -23,8 +25,6 @@ class ParameterWindow(QtGui.QWidget):
         self.main_window = main_window
 
     def setData(self, node, keys, values):
-
-        #print "setData", node, keys, values
 
         if node == self.node:
             for k, v in zip(keys, values):

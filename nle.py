@@ -97,13 +97,32 @@ class Scene():
         for c, pl in enumerate(self.playlists):
             self.multitrack.connect(pl, c)
 
-        self.consumer = mlt.Consumer(mlt_profile, "null")
+        #self.consumer = mlt.Consumer(mlt_profile, "null")
+        self.consumer = mlt.Consumer(mlt_profile, "sdl_audio")
+
+        #
+
+        ##ifdef Q_OS_WIN
+        #m_consumer->set("audio_buffer", 2048);
+        ##else
+        self.consumer.set("audio_buffer", 512)
+        ##endif
+
+        self.consumer.set("progressive", True)
+        #self.consumer.set("buffer", 25)
+        self.consumer.set("buffer", 1)
+        self.consumer.set("prefill", 1)
+        self.consumer.set("scrub_audio", 1)
+        self.consumer.set("volume", 1.0)
+
+        #self.consumer.set("test_card", "colour:colour=black")
+
+        #
 
         #self.consumer.set("real_time", -2)
         self.consumer.set("rescale", "none")
 
         self.consumer.connect(self.tractor)
-
 
 class MainForm(GLView):
 
@@ -155,7 +174,7 @@ class MainForm(GLView):
                 clip.end_frame = c*120+119
 
                 clip.track = random.randint(0, 1)
-                clip.path = "../media/output%d.mov" % clip.track
+                clip.path = "../media/output%d.mov" % (clip.track+1)
 
                 self.scene.clips.append(clip)
 
@@ -173,6 +192,11 @@ class MainForm(GLView):
         self.cursorLeft = QtGui.QCursor(QtGui.QPixmap("trim_left.png"))
         self.cursorRight = QtGui.QCursor(QtGui.QPixmap("trim_right.png"))
 
+        self.gl_font = QtGui.QFont("Arial", 9)
+
+        self.pointVertices = []
+        self.textureCoordinates = []
+
     def dragEnterEvent(self, event):
         event.accept()
 
@@ -183,6 +207,8 @@ class MainForm(GLView):
         GLView.dropEvent(self, event)
 
         if event.mimeData().hasUrls():
+            p = self.camera.qt_to_opengl(event.pos())
+            current_x = p.x()
             for url in event.mimeData().urls():
                 filename = str(url.toString(QtCore.QUrl.RemoveScheme))
                 filename = os.path.normpath(filename)
@@ -198,9 +224,7 @@ class MainForm(GLView):
 
                 clip.producer = mlt.Producer(mlt_profile, filename)
 
-                p = self.camera.qt_to_opengl(event.pos())
-
-                clip.start_frame = p.x()
+                clip.start_frame = current_x
 
                 cpgl = clip.producer.get_length()
 
@@ -208,6 +232,8 @@ class MainForm(GLView):
                     cpgl = 25
 
                 clip.end_frame = clip.start_frame+cpgl
+
+                current_x = clip.end_frame+1
 
                 clip.producer.set("in", 0)
                 clip.producer.set("out", cpgl)
@@ -224,6 +250,27 @@ class MainForm(GLView):
         GLView.resizeEvent(self, event)
         #self.parameters.setGeometry(self.geometry().left()+5, self.geometry().top()+80, self.parameters.width(), self.parameters.height())
         self.parameters.setGeometry(self.geometry().left()+5, self.geometry().top()+25, self.parameters.width(), self.parameters.height())
+
+        w = 1280/2
+        h = 720/2
+
+        #glColor4f(1.0, 1.0, 1.0, 1.0)
+        x1 = self.width()-w
+        y1 = 0
+
+        x2 = x1+w
+        y2 = y1+h
+
+        self.pointVertices = numpy.array([ x1, y1, x1, y2, x2, y2, x2, y1 ], dtype=numpy.float32)
+
+        x1 = 0
+        y1 = 0
+
+        x2 = w*2
+        y2 = h*2
+
+        self.textureCoordinates = numpy.array([ 0, 0, 0, y2, x2, y2, x2, 0 ], dtype=numpy.float32)
+
 
     def moveEvent(self, event):
         GLView.moveEvent(self, event)
@@ -291,7 +338,7 @@ class MainForm(GLView):
             for c in self.scene.clips:
                 c._selected = c.inside(p.x(), p.y())
 
-        self.update()
+        #self.update()
 
         selectedClips = filter(lambda i: i._selected, self.scene.clips)
 
@@ -299,6 +346,8 @@ class MainForm(GLView):
             k, v = c.getData()
             self.parameters.setData(c, k, v)
 
+        self.setUpdatesEnabled(False)
+        self.setCursor(QtCore.Qt.ArrowCursor)
         for c in selectedClips:
             if c.inside(p.x(), p.y()):
                 if p.x()-c.start_frame in range(0, 15):
@@ -309,6 +358,8 @@ class MainForm(GLView):
                     self.setCursor(self.cursorRight)
                 else:
                     self.setCursor(QtCore.Qt.ArrowCursor)
+        self.setUpdatesEnabled(True)
+        self.update()
 
     def mouseMoveEvent(self, event):
 
@@ -328,8 +379,8 @@ class MainForm(GLView):
 
             if (self.extendLeft is None) and (self.extendRight is None):
                 for n in selectedClips:
-                    n.start_frame += dx
-                    n.end_frame += dx
+                    n.start_frame = int(n.start_frame+dx)
+                    n.end_frame = int(n.end_frame+dx)
             else:
                 if self.extendLeft:
                     sel = self.extendLeft
@@ -344,6 +395,7 @@ class MainForm(GLView):
 
                     #elif self.start_frame > self.stop_frame:
 
+                    self.playhead = int(sel.start_frame)
 
                 elif self.extendRight:
                     sel = self.extendRight
@@ -353,6 +405,8 @@ class MainForm(GLView):
                     if sel.out_frame > sel.producer.get_length()-sel.in_frame:
                         sel.end_frame -= dx
                         sel.out_frame -= dx
+
+                    self.playhead = int(sel.end_frame)
 
             if nodesMoved:
                 c = selectedClips[0]
@@ -365,17 +419,14 @@ class MainForm(GLView):
 
             if not nodesMoved:
 
-                ph = self.camera.qt_to_opengl(event.pos())
+                if (self.extendLeft is None) and (self.extendRight is None):
+                    ph = self.camera.qt_to_opengl(event.pos())
+                    self.playhead = ph.x()
 
-                self.playhead = ph.x()
                 self.updateImage()
 
-                self.scene.consumer.purge()
-                self.scene.tractor.set_speed(0)
-                self.scene.tractor.seek(self.playhead-100)
-                self.scene.tractor.set_speed(1)
-
         else:
+            self.setCursor(QtCore.Qt.ArrowCursor)
             p = self.camera.qt_to_opengl(event.pos())
             selectedClips = filter(lambda i: i._selected, self.scene.clips)
             for c in selectedClips:
@@ -387,7 +438,6 @@ class MainForm(GLView):
                     else:
                         self.setCursor(QtCore.Qt.ArrowCursor)
 
-
     def keyPressEvent(self, event):
         GLView.keyPressEvent(self, event)
 
@@ -395,8 +445,8 @@ class MainForm(GLView):
             self.play = not self.play
 
             if self.play:
-                self.playbackTimer.start()
                 self.scene.consumer.purge()
+                self.playbackTimer.start()
                 self.scene.consumer.start()
             else:
                 self.playbackTimer.stop()
@@ -404,22 +454,81 @@ class MainForm(GLView):
                 self.scene.consumer.purge()
 
         elif event.key() == QtCore.Qt.Key_Left:
-            self.playhead -= 1
-            self.updateImage()
-            self.update()
+
+            if event.modifiers() & QtCore.Qt.ShiftModifier:
+                for clip in self.scene.clips:
+                    if clip._selected:
+                        clip.start_frame -= 1
+                        clip.end_frame -= 1
+
+                self.scene.generate_mlt()
+                self.updateImage()
+
+            else:
+                self.playhead -= 1
+                self.updateImage()
+                self.update()
 
         elif event.key() == QtCore.Qt.Key_Right:
-            self.playhead += 1
-            self.updateImage()
-            self.update()
+            if event.modifiers() & QtCore.Qt.ShiftModifier:
+                for clip in self.scene.clips:
+                    if clip._selected:
+                        clip.start_frame += 1
+                        clip.end_frame += 1
+
+                self.scene.generate_mlt()
+                self.updateImage()
+
+            else:
+                self.playhead += 1
+                self.updateImage()
+                self.update()
 
         elif event.key() == QtCore.Qt.Key_1: # view 1:1
             self.camera.identity()
             self.camera.translate(100, self.height()-50)
             self.update()
 
+        elif event.key() == QtCore.Qt.Key_A: # analyze
+            for count, pl in enumerate(self.scene.playlists):
+                print "---"*10
+                print "Playlist #%d" % count
+                for c in range(pl.count()):
+                    info = pl.clip_info(c)
+                    print info.start, info.frame_in, info.frame_out, info.length, info.frame_count, info.resource
+
         elif event.key() == QtCore.Qt.Key_C: # compact
-            pass
+
+            self.empty_frames = []
+
+            max_frame = 0
+
+            for c in self.scene.clips:
+                max_frame = max(max_frame, int(c.end_frame))
+
+            for f in range(max_frame+1):
+
+                blanks = []
+                for c, pl in enumerate(self.scene.playlists):
+                    producer = pl.get_clip_at(f)
+                    if producer is None:
+                        blanks.append(True)
+                    else:
+                        blanks.append(producer.is_blank())
+
+                if sum(blanks) == len(self.scene.playlists):
+                    self.empty_frames.append(f)
+
+            for clip in self.scene.clips:
+                ef = filter(lambda i: i < clip.start_frame, self.empty_frames)
+
+                clip.start_frame -= len(ef)
+                clip.end_frame -= len(ef)
+
+            self.scene.generate_mlt()
+
+            self.updateImage()
+            self.update()
 
         elif event.key() == QtCore.Qt.Key_Delete:
             for clip in self.scene.clips:
@@ -462,10 +571,28 @@ class MainForm(GLView):
                 self.updateImage()
 
         elif event.key() == QtCore.Qt.Key_I: # move in point
-            pass
+            selectedClips = filter(lambda i: i._selected, self.scene.clips)
+            if selectedClips:
+                c = selectedClips[0]
+
+                dx = self.playhead-c.start_frame
+                c.in_frame += dx
+                c.start_frame += dx
+
+                self.scene.generate_mlt()
+                self.updateImage()
 
         elif event.key() == QtCore.Qt.Key_O: # move out point
-            pass
+            selectedClips = filter(lambda i: i._selected, self.scene.clips)
+            if selectedClips:
+                c = selectedClips[0]
+
+                dx = self.playhead-c.end_frame
+                c.out_frame -= dx
+                c.end_frame -= dx
+
+                self.scene.generate_mlt()
+                self.updateImage()
 
         elif event.key() == QtCore.Qt.Key_F2: # rename
             selectedClips = filter(lambda i: i._selected, self.scene.clips)
@@ -496,7 +623,7 @@ class MainForm(GLView):
         # clips
 
         for clip in self.scene.clips:
-            self.unoptimizedLabelRect(clip.start_frame, 0-clip.track*50, clip.end_frame+1, 50-clip.track*50, clip.name, clip._color, (1, 1, 1, 1), selected = clip._selected)
+            self.unoptimizedLabelRect(clip.start_frame, 0-clip.track*50, clip.end_frame+1, 50-clip.track*50, clip.name, clip._color, selected = clip._selected)
 
         # switch back to screen space
 
@@ -510,6 +637,14 @@ class MainForm(GLView):
 
         timelineTicks = []
 
+        #max_frame = 0
+        #
+        #for c in self.scene.clips:
+        #    max_frame = max(max_frame, int(c.end_frame))
+        #
+        #max_frame = max(max_frame, self.width())
+        #for c in range((max_frame/25)+1):
+
         glColor4f(1, 1, 1, 1.0)
         for c in range(self.width()/25):
 
@@ -518,16 +653,26 @@ class MainForm(GLView):
             top = trackTop.y()
             height = 5
 
+            if c % 10 == 0:
+                height = 10
+
+                self.tc.frames = c*25
+                self.renderText(p1.x()+1, top-10-self.scene.tracks*50, "%s" % str(self.tc), self.gl_font)
+
             if c % 30 == 0:
                 height = 10
 
                 self.tc.frames = c*25
-                self.renderText(p1.x()+1, top-10-self.scene.tracks*50, "%s" % str(self.tc))
+                self.renderText(p1.x()+1, top-10-self.scene.tracks*50, "%s" % str(self.tc), self.gl_font)
 
             if c % 60 == 0:
                 height = 35
 
             timelineTicks.extend([p1.x(), top-height-self.scene.tracks*50, p1.x(), top-self.scene.tracks*50])
+
+        #glColor4f(1, 1, 1, 1.0)
+        #for c in range(self.width()/25):
+        #    timelineTicks.extend([p1.x(), top-height-self.scene.tracks*50, p1.x(), top-self.scene.tracks*50])
 
         glColor4f(1.0, 0.0, 1.0, 1.0)
         glVertexPointer(2, GL_FLOAT, 0, timelineTicks)
@@ -572,8 +717,8 @@ class MainForm(GLView):
 
         glColor4f(0.0, 0.0, 0.0, 1.0)
         self.tc.frames = self.playhead#-leftHandWidth
-        self.renderText(sph-30+2, trackTop.y()-self.scene.tracks*50-25-15, "%s" % str(self.tc))
-        self.renderText(sph-30+2, trackTop.y()-self.scene.tracks*50-25-15+12, "%s" % str(self.tc.frames))
+        self.renderText(sph-30+2, trackTop.y()-self.scene.tracks*50-25-15, "%s" % str(self.tc), self.gl_font)
+        self.renderText(sph-30+2, trackTop.y()-self.scene.tracks*50-25-15+12, "%s" % str(self.tc.frames), self.gl_font)
 
         # track names
 
@@ -581,7 +726,7 @@ class MainForm(GLView):
             clipsCoordinates = 0 # vertically
 
             p1 = self.camera.opengl_to_qt(QtCore.QPoint(0, clipsCoordinates))
-            self.unoptimizedLabelRect(0, p1.y()-(c)*50, leftHandWidth, p1.y()-(c-1)*50, "track %d" % c, (0.5, 0.5, 0.5, 1), (1, 1, 1, 1), False, False)
+            self.unoptimizedLabelRect(0, p1.y()-(c)*50, leftHandWidth, p1.y()-(c-1)*50, "track %d" % c, (0.5, 0.5, 0.5, 1), False, False)
 
         # image
 
@@ -592,25 +737,7 @@ class MainForm(GLView):
 
         if self.texture != -1:
 
-            w = 1280/2
-            h = 720/2
-
             glColor4f(1.0, 1.0, 1.0, 1.0)
-            x1 = self.width()-w
-            y1 = 0
-
-            x2 = x1+w
-            y2 = y1+h
-
-            pointVertices = numpy.array([ x1, y1, x1, y2, x2, y2, x2, y1 ], dtype=numpy.float32)
-
-            x1 = 0
-            y1 = 0
-
-            x2 = w*2
-            y2 = h*2
-
-            textureCoordinates = numpy.array([ 0, 0, 0, y2, x2, y2, x2, 0 ], dtype=numpy.float32)
 
             glEnable(texture_mode)
 
@@ -620,10 +747,10 @@ class MainForm(GLView):
             glBindTexture(texture_mode, self.texture)
 
 
-            glVertexPointer(2, GL_FLOAT, 0, pointVertices)
-            glTexCoordPointer(2, GL_FLOAT, 0, textureCoordinates)
+            glVertexPointer(2, GL_FLOAT, 0, self.pointVertices)
+            glTexCoordPointer(2, GL_FLOAT, 0, self.textureCoordinates)
 
-            glDrawArrays(GL_QUADS, 0, len(pointVertices)/2)
+            glDrawArrays(GL_QUADS, 0, len(self.pointVertices)/2)
 
             glDisableClientState(GL_TEXTURE_COORD_ARRAY)
             glDisableClientState(GL_VERTEX_ARRAY)
@@ -633,15 +760,15 @@ class MainForm(GLView):
 
             glEnableClientState(GL_VERTEX_ARRAY)
 
-            glVertexPointer(2, GL_FLOAT, 0, pointVertices)
-            glDrawArrays(GL_LINE_STRIP, 0, len(pointVertices)/2)
+            glVertexPointer(2, GL_FLOAT, 0, self.pointVertices)
+            glDrawArrays(GL_LINE_STRIP, 0, len(self.pointVertices)/2)
 
             glDisableClientState(GL_VERTEX_ARRAY)
 
         # debugging - fps
 
-        glColor4f(1.0, 1.0, 1.0, 1.0)
-        dtime = time.time()-time1
+        #glColor4f(1.0, 1.0, 1.0, 1.0)
+        #dtime = time.time()-time1
         #self.renderText(self.width()-100, self.height()-25, "%05d fps" % (int(1/dtime)))
 
         # current tc
@@ -688,7 +815,7 @@ class MainForm(GLView):
               x2, y2,
               x2, y1, ]
 
-    def unoptimizedLabelRect(self, x1, y1, x2, y2, label, color1, color2, fontScaled = True, selected = False):
+    def unoptimizedLabelRect(self, x1, y1, x2, y2, label, color1, fontScaled = True, selected = False):
 
         if selected:
             color1 = (color1[0]*1.1, color1[1]*1.1, color1[2]*1.1, color1[3])
@@ -719,15 +846,12 @@ class MainForm(GLView):
         #
 
         bcolor = (color1[0]*1.3, color1[1]*1.3, color1[2]*1.3, color1[3])
+        dcolor = (color1[0]/1.1, color1[1]/1.1, color1[2]/1.1, color1[3])
 
-        #glColor4f(1, 1, 1, 0.5)
         glColor4f(*bcolor)
         glVertexPointer(2, GL_FLOAT, 0, vertices_lt)
         glDrawArrays(GL_QUADS, 0, len(vertices_lt)/2)
 
-        dcolor = (color1[0]/1.1, color1[1]/1.1, color1[2]/1.1, color1[3])
-
-        #glColor4f(0.5, 0.5, 0.5, 0.5)
         glColor4f(*dcolor)
         glVertexPointer(2, GL_FLOAT, 0, vertices_br)
         glDrawArrays(GL_QUADS, 0, len(vertices_br)/2)
@@ -739,11 +863,12 @@ class MainForm(GLView):
             dx = 1
         else:
             dx = 0
+
         if fontScaled:
             p1 = self.camera.opengl_to_qt(QtCore.QPoint(x1, y1))
-            self.renderText(p1.x()+2+dx, p1.y()+10+2+dx, label)
+            self.renderText(p1.x()+2+dx, p1.y()+10+2+dx, label, self.gl_font)
         else:
-            self.renderText(x1+2+dx, y1+10+2+dx, label)
+            self.renderText(x1+2+dx, y1+10+2+dx, label, self.gl_font)
 
 if __name__ == '__main__':
 
