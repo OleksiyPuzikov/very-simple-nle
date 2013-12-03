@@ -189,10 +189,10 @@ class MainForm(GLView):
         self.extendLeft = None
         self.extendRight = None
 
-        self.cursorLeft = QtGui.QCursor(QtGui.QPixmap("trim_left.png"))
-        self.cursorRight = QtGui.QCursor(QtGui.QPixmap("trim_right.png"))
+        self.cursorLeft = QtGui.QCursor(QtGui.QPixmap("img/trim_left.png"))
+        self.cursorRight = QtGui.QCursor(QtGui.QPixmap("img/trim_right.png"))
 
-        self.gl_font = QtGui.QFont("Arial", 9)
+        self.gl_font = QtGui.QFont("Tahoma", 9)
 
         self.pointVertices = []
         self.textureCoordinates = []
