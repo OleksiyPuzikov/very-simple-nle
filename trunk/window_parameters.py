@@ -22,6 +22,7 @@ class PlayerWindow(QtGui.QWidget):
 
         self.clip = None
         self.playhead = 0
+        self.playheadX = 0
 
         self.img = QtGui.QImage()
 
@@ -54,7 +55,7 @@ class PlayerWindow(QtGui.QWidget):
 
         if self.clip:
 
-            color = [c*255 for c in clip._color]
+            color = [c*255 for c in self.clip._color]
             white = QtGui.QColor(255, 255, 255)
 
             painter.setPen(QtGui.QColor(*color))
@@ -158,7 +159,9 @@ class ParameterWindow(QtGui.QWidget):
     def __init__(self, main_window=None, parent=None):
         QtGui.QWidget.__init__(self, parent)
 
-        #self.setWindowFlags(QtCore.Qt.WindowTitleHint | QtCore.Qt.WindowStaysOnTopHint | QtCore.Qt.Tool | QtCore.Qt.CustomizeWindowHint)
+        if __name__ != '__main__':
+            self.setWindowFlags(QtCore.Qt.WindowTitleHint | QtCore.Qt.WindowStaysOnTopHint | QtCore.Qt.Tool | QtCore.Qt.CustomizeWindowHint)
+
         self.setWindowTitle("properties")
 
         self.setStyleSheet("""font-size:10pt; background-color: rgb(70, 70, 70); color: rgb(255, 255, 255);""")
