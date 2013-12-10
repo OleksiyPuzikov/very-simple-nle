@@ -443,10 +443,10 @@ class MainForm(GLView):
             if self.play:
                 self.scene.consumer.purge()
                 self.playbackTimer.start()
-                self.scene.consumer.start()
+                # self.scene.consumer.start()
             else:
                 self.playbackTimer.stop()
-                self.scene.consumer.stop()
+                # self.scene.consumer.stop()
                 self.scene.consumer.purge()
 
         elif event.key() == QtCore.Qt.Key_Left:
@@ -484,6 +484,39 @@ class MainForm(GLView):
             self.camera.identity()
             self.camera.translate(100, self.height()-50)
             self.update()
+
+        elif event.key() == QtCore.Qt.Key_R: # render
+
+            # parameters = "f=avi acodec=pcm_s16le ac=2 vcodec=huffyuv"
+            parameters = "f=avi acodec=pcm_s16le ac=2 vcodec=huffyuv"
+            consumer = mlt.Consumer(mlt_profile, "avformat", "output.avi")
+            consumer.set("rescale", "none")
+
+            data = parameters.split(" ")
+            for l in data:
+                k, v = l.split("=")
+                consumer.set(k, v)
+
+            consumer.connect(self.scene.tractor)
+
+            self.scene.tractor.set_speed(0)
+            self.scene.tractor.seek(0)
+            self.scene.tractor.set_speed(1)
+
+            print "starting rendering"
+            consumer.start()
+
+            import time
+            while consumer.is_stopped() == 0:
+                progress = int(100.0*self.scene.tractor.frame()/self.scene.tractor.get_length())
+                print "%3d" % progress,
+                print "[%s%s]" % ( "#"*progress, " "*(100-progress) )
+                time.sleep(1)
+
+            progress = 100
+            print "%3d" % progress,
+            print "[%s%s]" % ( "#"*progress, " "*(100-progress) )
+            print "finished"
 
         elif event.key() == QtCore.Qt.Key_A: # analyze
             for count, pl in enumerate(self.scene.playlists):
@@ -763,9 +796,9 @@ class MainForm(GLView):
 
         # debugging - fps
 
-        #glColor4f(1.0, 1.0, 1.0, 1.0)
-        #dtime = time.time()-time1
-        #self.renderText(self.width()-100, self.height()-25, "%05d fps" % (int(1/dtime)))
+        glColor4f(1.0, 1.0, 1.0, 1.0)
+        dtime = time.time()-time1
+        self.renderText(self.width()-100, self.height()-25, "%05d fps" % (int(1/dtime)))
 
         # current tc
 
