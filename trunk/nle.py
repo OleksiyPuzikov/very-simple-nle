@@ -487,7 +487,6 @@ class MainForm(GLView):
 
         elif event.key() == QtCore.Qt.Key_R: # render
 
-            # parameters = "f=avi acodec=pcm_s16le ac=2 vcodec=huffyuv"
             parameters = "f=avi acodec=pcm_s16le ac=2 vcodec=huffyuv"
             consumer = mlt.Consumer(mlt_profile, "avformat", "output.avi")
             consumer.set("rescale", "none")
