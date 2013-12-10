@@ -443,10 +443,10 @@ class MainForm(GLView):
             if self.play:
                 self.scene.consumer.purge()
                 self.playbackTimer.start()
-                # self.scene.consumer.start()
+                self.scene.consumer.start()
             else:
                 self.playbackTimer.stop()
-                # self.scene.consumer.stop()
+                self.scene.consumer.stop()
                 self.scene.consumer.purge()
 
         elif event.key() == QtCore.Qt.Key_Left:
